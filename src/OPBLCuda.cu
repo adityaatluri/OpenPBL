@@ -1,19 +1,6 @@
 #include"OPBLCuda.h"
-/*
-This file include all CUDA kernels for lighting
-*/
-__device__ vec4 IntegrateBRDF(BSDFSamplesStruct *bs,
-								BSDFSamplesStruct *bsbvh,
-								vec4 wi,
-								vec4 P,
-								int numSpecLobes,
-								int numSpecSamples,
-								float roughness,
-								float *rand1,
-								float *rand2){
-	bs->sample(wi, numSpecSamples, bs, roughness, rand1, rand2);
-	bsbvh = BVHReduce(P, bs);
-}
+
+using namespace opblcuda;
 
 __device__ void sample(vec4 wi,
 							int lobeSamples,
@@ -30,9 +17,9 @@ __device__ void sample(vec4 wi,
 		float costheta2 = costheta * costheta;
 		float costheta3 = costheta * costheta2;
 		vec4 H = SpericalDir(sqrt(1-costheta2), costheta, 2*PI*rand2[i]);
-		float VdotH = wi*H;
+		float VdotH = dot(wi,H);
 		vec4 wo =  2.0f * VdotH * H - wi;
-		if (wo*H > 0){
+		if (dot(wo,H) > 0){
 			bs->pdf[numCurrent] = rand1[i] * ratio / (4 * PI * costheta3 * roughness2 * abs(VdotH));
 			bs->weight[numCurrent] = specColor / ratio;
 			bs->dir[numCurrent] = wo;
@@ -42,20 +29,16 @@ __device__ void sample(vec4 wi,
 	bs->numValid = numCurrent;
 }
 
-__global__ void IntegrateBrdf(BSDFSamplesStruct *bs_d,
-	BSDFSamplesStruct *bsbvh_d,
-	int numSpecLobes){
-	unsigned tid = threadIdx.x + blockIdx.x * blockDim.x;
-
-}
-
+/*
+Algorithm 1
+*/
 __device__ void sample(LightSamplingStruct *ls,
 						vec4 lightCenterPos,
 						vec4 P, float radius,
 						float rayWeight,
 						float *rand1){
 	vec4 lightCenterDir = lightCenterPos - P;
-	float d2 = lightCenterDir*lightCenterDir;
+	float d2 = dot(lightCenterDir,lightCenterDir);
 	float radius2 = radius*radius;
 	if (d2 - radius2 > 1e-4){
 		float d = sqrt(d2);
@@ -82,6 +65,9 @@ __device__ void sample(LightSamplingStruct *ls,
 	}
 }
 
+/*
+Algorithm 3
+*/
 __device__ void diffConvolution(vec4 *diffColor,
 								float radius,
 								vec4 lightColor,
@@ -93,8 +79,8 @@ __device__ void diffConvolution(vec4 *diffColor,
 	if (lightColor != zero){
 		float radius2 = radius * radius;
 		vec4 lightCenterDir = lightCenterPos - P;
-		float d2 = lightCenterDir*lightCenterDir;
-		float cosTheta = lightCenterDir*N / (sqrt(d2));
+		float d2 = dot(lightCenterDir,lightCenterDir);
+		float cosTheta = dot(lightCenterDir,N) / (sqrt(d2));
 		if (d2 - radius2 > 1e-4){
 			float d = sqrt(d2);
 			float sinAlpha = radius / d;
@@ -132,6 +118,9 @@ __device__ void diffConvolution(vec4 *diffColor,
 	}
 }
 
+/*
+Algorithm 13
+*/
 __device__ void computeBRDFShadows(vec4* CspecBRDF, vec4 *SpecDiff){
 	/*
 	size of:
@@ -147,6 +136,9 @@ __device__ void computeBRDFShadows(vec4* CspecBRDF, vec4 *SpecDiff){
 	}
 }
 
+/*
+Algorithm 12
+*/
 __device__ void computeLightShadows(LightSamplingStruct *ls,
 									LightSamplingStruct *li,
 									vec4 *Cdiff, vec4 *Cspec, vec4 *SpecDiff){
@@ -170,7 +162,7 @@ __device__ void computeLightShadows(LightSamplingStruct *ls,
 		}
 	}
 	vec4 diffConv;
-	if (li->diffuseConvolution(diffConv) == true){
+	if (li->diffConvolution(diffConv) == true){
 		diffConv *= bsdf->albedo();
 		SpecDiff[0] += (one - avgVis) * (diffConv - SpecDiff[1]);
 		SpecDiff[1] = diffConv;
@@ -178,6 +170,7 @@ __device__ void computeLightShadows(LightSamplingStruct *ls,
 }
 
 /*
+Algorithm 11
 ComputeMIS needs a loads of revision and thought!
 */
 __device__ vec4* ComputeMIS(LightSamplingStruct *ls,
@@ -207,6 +200,9 @@ __device__ vec4* ComputeMIS(LightSamplingStruct *ls,
 	}
 }
 
+/*
+Algorithm 2
+*/
 __device__ void emissionAndPDF(BSDFSamplesStruct *bs,
 								LightEmmisionStruct *le,
 								vec4 P, vec4 lightCenterPos,
@@ -214,7 +210,7 @@ __device__ void emissionAndPDF(BSDFSamplesStruct *bs,
 								vec4 lightColor){
 	vec4 lightCenterDir = P - lightCenterPos;
 	vec4 zero = {0.0f, 0.0f, 0.0f, 1.0f};
-	float d2 = lightCenterDir * lightCenterDir;
+	float d2 = dot(lightCenterDir, lightCenterDir);
 	float radius2 = radius*radius;
 	bool isValid = false;
 	if (d2 - radius2 >= 1e-4){
@@ -223,8 +219,8 @@ __device__ void emissionAndPDF(BSDFSamplesStruct *bs,
 		for (int i = 0; i < bs->numValid; i++){
 			bool isValid = false;
 			vec4 dir = bs->dir[i];
-			float b = 2 * dir*lightCenterDir;
-			float c = lightCenterDir * lightCenterDir - radius2;
+			float b = 2 * dot(dir,lightCenterDir);
+			float c = dot(lightCenterDir , lightCenterDir) - radius2;
 			float delta = b * b - 4 * c;
 			if (delta > 0){
 				float t = (-b - sqrt(delta)) / 2;
@@ -246,6 +242,9 @@ __device__ void emissionAndPDF(BSDFSamplesStruct *bs,
 	}
 }
 
+/*
+Algorithm 5
+*/
 __device__ void valueAndPDF(vec4 wi, vec4* wos,
 							BSDFValueStruct *bv,
 							vec4 N, vec4 specColor,
@@ -254,14 +253,14 @@ __device__ void valueAndPDF(vec4 wi, vec4* wos,
 	vec4 zero = { 0.0f, 0.0f, 0.0f, 1.0f };
 	for (int i = 0; i < bv->numSamples; i++){
 		wo = wos[i];
-		if (wo*N > 0){
+		if (dot(wo,N) > 0){
 			hasValidValues = true;
 			vec4 H = normalize(wo+wi);
-			float costheta = H*N;
+			float costheta = dot(H,N);
 			float costheta2 = costheta*costheta;
 			float costheta3 = costheta2* costheta;
 			float roughness2 = roughness*roughness;
-			float pdf = exp((costheta2 - 1)/(roughness2 * costheta2))/(4*PI*costheta3*roughness2*(wi*H));
+			float pdf = exp((costheta2 - 1)/(roughness2 * costheta2))/(4*PI*costheta3*roughness2*dot(wi,H));
 			bv->value[i] = pdf*specColor;
 			bv->pdf[i] = pdf;
 		}
@@ -273,15 +272,17 @@ __device__ void valueAndPDF(vec4 wi, vec4* wos,
 }
 
 /*
+Algorithm 7
 It is parallelized here by assigning each thread to a specular BRDF
 
 wouts length is NUM_DIRECTIONS
 According to this function, the number of directions is equal to
 number of samples.
 */
-__device__ void valueAndPDF_Spec(BSDFValueStruct *bv,
-								BSDFValueStruct *onebv,
-								vec4 wi, vec4* wouts){
+__device__ void valueAndPDF_Spec(
+	BSDFValueStruct *bv,
+	BSDFValueStruct *onebv,
+	vec4 wi, vec4* wouts){
 	valueAndPDF(wi, wouts, onebv);
 	vec4 zero = { 0.0f, 0.0f, 0.0f, 1.0f };
 	for (int k = 0; k < NUM_DIRECTIONS; k++){
@@ -292,13 +293,67 @@ __device__ void valueAndPDF_Spec(BSDFValueStruct *bv,
 	push(bv, onebv);
 }
 
-__global__ void IntegrateLight(){
-	unsigned tid = threadIdx.x + blockIdx.x * blockDim.x;
+/*
+Algorithm 10
+*/
+__global__ void IntegrateBRDF(
+	BSDFSamplesStruct *bs,
+	BSDFSamplesStruct *bsbvh,
+	vec4 *wi,
+	vec4 P,
+	int numSpecLobes,
+	int numSpecSamples,
+	float roughness,
+	float **rand1,
+	float **rand2){
 
+	unsigned tid = threadIdx.x + blockIdx.x * blockDim.x;
+	bs->sample(wi[tid], numSpecSamples, &bs[tid], roughness, rand1[tid], rand2[tid]);
+	/* TODO
+	    |
+	   \|/
+	*/
+	bsbvh = BVHReduce(P, bs);
+}
+
+/*
+Algorithm 9
+*/
+__global__ void IntegrateLight(
+	LightSamplingStruct *ls,
+	BSDFSamplesStruct *bs,
+	BSDFSamplesStruct *bsdf,
+	BSDFValueStruct *bv,
+	BSDFValueStruct *onebv,
+	vec4 lightCenterPos, vec4 *P,
+	float radius, float *rayWeight,
+	float **rand1){
+
+	unsigned tid = threadIdx.x + blockIdx.x * blockDim.x;
+	ls[tid].sample(&ls[tid], lightCenterPos, P[tid], radius, rayWeight[tid], rand1[tid]);
+	int numGenerateLightSamples = ls[tid].numValid;
+	int numActiveSpecSamples = bs[tid].numValid;
+	if (numGenerateLightSamples > 0){
+		valueAndPDF_Diff(diffValues);
+		valueAndPDF_Spec(specValues);
+	}
+	emissionAndPDF(bs, lightValues);
+	ComputeMIS(ls, diffValues, specValues, bs, lightValues, Cdiff, Cspec, CspecBRDF);
+	if (numGenerateLightSamples > 0){
+		computeLightShadows(ls, li, Cdiff, Cspec, C);
+	}
+	if (numActiveSpecSamples > 0){
+		computeBRDFShadows(CspecBRDF, specPerLight, specPerLightNoShad);
+	}
+	lightDiff = mix(C[1], C[0], shadowDensity);
+	lightSpec = mix(C[3], C[2], shadowDensity);
 }
 
 
-
+/*
+Algorithm 6
+*/
 unsigned Integrate(){
 // Call IntegrateBrdf cuda code here!
+// Call IntegrateLight cuda code here!
 }
