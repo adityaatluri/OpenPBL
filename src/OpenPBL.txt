@@ -1,0 +1,11 @@
+numSpecLobes for each BSDFSamplesStruct is a number (single entry variable). Which is, number of Number of lobes
+
+The number of samples per lobe is stored in an array  numLobeSamples.
+Here, we limit all the samples per lobe to 1024 designated as NUM_SAMPLES. Array length which is numSpecLobes to 1024 designated as NUM_LOBES.
+
+NUM_SAMPLES = numLobeSamples;
+NUM_LOBES = numSpecLobes;
+The actual variable is numSpecularBRDFs. This is our actual thread on GPU. 
+
+Here, we assume that, each SpecularBRDF is assigned to each point in the scene (each vertex).
+
