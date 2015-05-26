@@ -1,5 +1,7 @@
 #include"OPBLCuda.h"
-
+/*
+This file include all CUDA kernels for lighting
+*/
 __device__ vec4 IntegrateBRDF(BSDFSamplesStruct *bs,
 								BSDFSamplesStruct *bsbvh,
 								vec4 wi,
